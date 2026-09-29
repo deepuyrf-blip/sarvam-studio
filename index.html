@@ -148,10 +148,15 @@ async function clone(){
   if(!vid)return alert("Pehle voice select karo — chip dabao ya voice_id paste karo");
   if(!t)return alert("Generate karne ke liye text likho");
   try{
-    const fd=new FormData();fd.append("voice_id",vid);fd.append("text",t);fd.append("language_code",$("cl").value);
-    const r=await fetch("https://api.sarvam.ai/voices/clone",{method:"POST",headers:{"api-subscription-key":DKEY},body:fd});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok)throw Error((j.error&&j.error.message)||j.error||JSON.stringify(j));
+    let j;
+    if(API_MODE==="direct"){
+      const fd=new FormData();fd.append("voice_id",vid);fd.append("text",t);fd.append("language_code",$("cl").value);
+      const r=await fetch("https://api.sarvam.ai/voices/clone",{method:"POST",headers:{"api-subscription-key":DKEY},body:fd});
+      j=await r.json().catch(()=>({}));
+      if(!r.ok)throw Error((j.error&&j.error.message)||j.error||JSON.stringify(j));
+    }else{
+      j=await req("/api/clone",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({voice_id:vid,text:t,language_code:$("cl").value})});
+    }
     if(!j.audio)throw Error("Audio response nahi mili");
     $("ca").src="data:audio/wav;base64,"+j.audio;
     $("co").textContent="Generated \u2713";

@@ -145,6 +145,19 @@ export async function onRequest(context) {
   // 2) immediately generate speech with that voice_id
   if (path === "/api/clone" && request.method === "POST") {
     try {
+      const ctype = (request.headers.get("content-type") || "").toLowerCase();
+      if (ctype.includes("application/json")) {
+        const input = await request.json();
+        if (!input.voice_id || !input.text) {
+          return json(request, { error: "voice_id and text are required." }, 400);
+        }
+        const form = new FormData();
+        form.append("voice_id", String(input.voice_id));
+        form.append("text", String(input.text));
+        form.append("language_code", String(input.language_code || "hi-IN"));
+        const response = await sarvamFetch(`${SARVAM_API}/voices/clone`, env, { method: "POST", body: form });
+        return withCors(request, response);
+      }
       const incoming = await request.formData();
       const file = incoming.get("ref_audio");
       const text = String(incoming.get("text") || "");

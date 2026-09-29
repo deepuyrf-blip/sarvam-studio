@@ -27,11 +27,61 @@
 
 
 <script>
-const $=x=>document.getElementById(x),BASE="",historyData=JSON.parse(localStorage.getItem("sarvam_pro_history")||"[]"),chatHistory=[];
+const $=x=>document.getElementById(x),BASE="";let historyData=JSON.parse(localStorage.getItem("sarvam_pro_history")||"[]");const chatHistory=[];
+const SARVAM_DIRECT="https://api.sarvam.ai";
+let API_MODE="proxy";
+let DKEY=(function(){try{return localStorage.getItem("sarvam_direct_key")||""}catch(e){return""}})();
+function directBase(p){
+  if(p==="/api/tts")return SARVAM_DIRECT+"/text-to-speech";
+  if(p==="/api/stt")return SARVAM_DIRECT+"/speech-to-text";
+  if(p==="/api/translate")return SARVAM_DIRECT+"/translate";
+  if(p==="/api/chat")return SARVAM_DIRECT+"/v1/chat/completions";
+  if(p.startsWith("/api/dub/jobs"))return "https://studio.sarvam.ai/api/dubbing/jobs"+p.slice("/api/dub/jobs".length);
+  return null;
+}
+async function directClone(opt){
+  const fd=opt.body,file=fd.get("ref_audio"),text=String(fd.get("text")||""),lang=String(fd.get("language_code")||"hi-IN");
+  const cf=new FormData();cf.append("name","web-"+Date.now());cf.append("language",lang);cf.append("file",file,file.name||"reference.wav");
+  let r=await fetch(SARVAM_DIRECT+"/voices/create",{method:"POST",headers:{"api-subscription-key":DKEY},body:cf});
+  let j=await r.json().catch(()=>({}));
+  if(!r.ok)throw Error((j.error&&j.error.message)||j.error||JSON.stringify(j));
+  const vid=j.voice_id||(j.data&&j.data.voice_id)||j.id;
+  if(!vid)throw Error("Sarvam did not return a voice_id");
+  const kf=new FormData();kf.append("voice_id",vid);kf.append("text",text);kf.append("language_code",lang);
+  r=await fetch(SARVAM_DIRECT+"/voices/clone",{method:"POST",headers:{"api-subscription-key":DKEY},body:kf});
+  j=await r.json().catch(()=>({}));
+  if(!r.ok)throw Error((j.error&&j.error.message)||j.error||JSON.stringify(j));
+  return j;
+}
+function keyPromptHandler(){
+  const s=$("apiStatus");s.style.cursor="pointer";s.title="Set Sarvam API key";
+  s.onclick=()=>{const k=prompt("Sarvam API key daalo (dashboard.sarvam.ai se):",DKEY);if(k&&k.trim()){DKEY=k.trim();try{localStorage.setItem("sarvam_direct_key",DKEY)}catch(e){}health()}};
+}
+async function tryDirect(){
+  if(!DKEY){
+    setApiStatus("bad","No server function — tap here to set API key");
+    $("conn").textContent="Direct key needed";$("dot").classList.remove("ok");
+    keyPromptHandler();
+    return;
+  }
+  setApiStatus("checking","Validating key…");
+  try{
+    const r=await fetch(SARVAM_DIRECT+"/text-lid",{method:"POST",headers:{"Content-Type":"application/json","api-subscription-key":DKEY},body:JSON.stringify({input:"hi"})});
+    if(!r.ok)throw Error("invalid");
+    API_MODE="direct";
+    setApiStatus("ok","Direct API mode");
+    $("conn").textContent="Direct API";$("dot").classList.add("ok");
+    keyPromptHandler();
+  }catch(e){
+    setApiStatus("bad","Invalid API key — tap to re-enter");
+    $("conn").textContent="Invalid key";$("dot").classList.remove("ok");
+    keyPromptHandler();
+  }
+}
 function tab(id){document.querySelectorAll(".view").forEach(x=>x.classList.remove("on"));$(id).classList.add("on");document.querySelectorAll(".nav").forEach(x=>x.classList.toggle("on",x.dataset.v===id));$("title").textContent={home:"Dashboard",tts:"Text to Speech",stt:"Transcript",clone:"Voice Clone",dub:"AI Dubbing",tr:"Translate",chat:"AI Chat",history:"History"}[id];$("side").classList.remove("open");if(id==="history")renderH()}
 document.querySelectorAll(".nav").forEach(x=>x.onclick=()=>tab(x.dataset.v));document.querySelectorAll("[data-o]").forEach(x=>x.onclick=()=>tab(x.dataset.o));
-async function req(path,opt={}){let r=await fetch(BASE+path,opt),d=await r.json().catch(()=>({error:r.statusText||"Non-JSON response (HTTP "+r.status+")"}));if(!r.ok)throw Error(d.message||d.error?.message||d.error||d.detail||JSON.stringify(d));return d}
-function setApiStatus(state,message){const dot=$("apiStatusDot"),txt=$("apiStatusText");if(!dot||!txt)return;txt.textContent=message;if(state==="ok"){dot.style.background="#22c55e";dot.style.boxShadow="0 0 12px rgba(34,197,94,.65)"}else if(state==="bad"){dot.style.background="#ef4444";dot.style.boxShadow="0 0 12px rgba(239,68,68,.55)"}else{dot.style.background="#f59e0b";dot.style.boxShadow="0 0 12px rgba(245,158,11,.55)"}}async function health(){setApiStatus("checking","Checking API…");try{const r=await fetch(BASE+"/api/health",{method:"GET",cache:"no-store"});const ct=r.headers.get("content-type")||"";const d=await r.json().catch(()=>null);if(!r.ok)throw new Error(d&&d.error||"HTTP "+r.status);if(!d||d.ok!==true)throw new Error("API function not deployed (got "+(ct.includes("html")?"HTML page":"invalid response")+")");if(d.apiKeyConfigured===false){setApiStatus("bad","🔴 API key not configured");$("conn").textContent="API key missing";$("dot").classList.remove("ok");return}setApiStatus("ok","🟢 API Connected");$("conn").textContent="API Connected";$("dot").classList.add("ok")}catch(e){setApiStatus("bad","🔴 API Not Connected");$("conn").textContent="API Not Connected";$("dot").classList.remove("ok")}}
+async function req(path,opt={}){if(API_MODE==="direct"){if(path==="/api/clone")return directClone(opt);const d=directBase(path);if(!d)throw Error("Route not available: "+path);const o=Object.assign({},opt);o.headers=Object.assign({},opt.headers||{});if(!(o.body instanceof FormData))o.headers["Content-Type"]="application/json";o.headers["api-subscription-key"]=DKEY;if(path==="/api/tts"&&typeof o.body==="string"){try{const b=JSON.parse(o.body);if(b.target_language_code){b.language_code=b.target_language_code;delete b.target_language_code}o.body=JSON.stringify(b)}catch(e){}}if(path==="/api/stt"&&o.body instanceof FormData){o.body.delete("mode");o.body.delete("sample_rate")}let r=await fetch(d,o),j=await r.json().catch(()=>({error:r.statusText||("HTTP "+r.status)}));if(!r.ok)throw Error(j.message||(j.error&&j.error.message)||j.error||j.detail||JSON.stringify(j));return j}let r=await fetch(BASE+path,opt),d=await r.json().catch(()=>({error:r.statusText||"Non-JSON response (HTTP "+r.status+")"}));if(!r.ok)throw Error(d.message||(d.error&&d.error.message)||d.error||d.detail||JSON.stringify(d));return d}
+function setApiStatus(state,message){const dot=$("apiStatusDot"),txt=$("apiStatusText");if(!dot||!txt)return;txt.textContent=message;if(state==="ok"){dot.style.background="#22c55e";dot.style.boxShadow="0 0 12px rgba(34,197,94,.65)"}else if(state==="bad"){dot.style.background="#ef4444";dot.style.boxShadow="0 0 12px rgba(239,68,68,.55)"}else{dot.style.background="#f59e0b";dot.style.boxShadow="0 0 12px rgba(245,158,11,.55)"}}async function health(){setApiStatus("checking","Checking API…");try{const r=await fetch(BASE+"/api/health",{method:"GET",cache:"no-store"});const ct=r.headers.get("content-type")||"";const d=await r.json().catch(()=>null);if(!r.ok)throw new Error(d&&d.error||"HTTP "+r.status);if(!d||d.ok!==true)throw new Error("API function not deployed (got "+(ct.includes("html")?"HTML page":"invalid response")+")");if(d.apiKeyConfigured===false){setApiStatus("bad","🔴 API key not configured");$("conn").textContent="API key missing";$("dot").classList.remove("ok");return}setApiStatus("ok","🟢 API Connected");$("conn").textContent="API Connected";$("dot").classList.add("ok")}catch(e){await tryDirect()}}
 function save(type,input,out,status="success"){historyData.unshift({time:new Date().toLocaleString(),type,input:String(input||"").slice(0,1500),out:String(out||"").slice(0,2500),status});historyData=historyData.slice(0,300);localStorage.setItem("sarvam_pro_history",JSON.stringify(historyData))}
 function renderH(){$("hl").innerHTML=historyData.length?historyData.map(x=>`<div class="h"><b>${esc(x.type)}</b><time>${esc(x.time)}</time><p>${esc(x.input)}
 
